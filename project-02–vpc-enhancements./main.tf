@@ -45,3 +45,57 @@ resource "aws_flow_log" "enterprise_vpc_flow_logs" {
     Environment = var.environment
   }
 }
+
+resource "aws_network_acl" "public" {
+  vpc_id = data.aws_vpc.existing.id
+  tags = {
+    Name        = "enterprise-public-nacl"
+    Environment = var.environment
+  }
+}
+
+resource "aws_network_acl_rule" "public_inbound_http" {
+  network_acl_id = aws_network_acl.public.id
+  rule_number    = 100
+  protocol       = "tcp"
+  rule_action    = "allow"
+  egress         = false
+  cidr_block     = "0.0.0.0/0"
+  from_port      = 80
+  to_port        = 80
+}
+
+
+resource "aws_network_acl_rule" "public_inbound_https" {
+  network_acl_id = aws_network_acl.public.id
+  rule_number    = 110
+  protocol       = "tcp"
+  rule_action    = "allow"
+  egress         = false
+  cidr_block     = "0.0.0.0/0"
+  from_port      = 443
+  to_port        = 443
+}
+
+
+resource "aws_network_acl_rule" "public_inbound_ephemeral" {
+  network_acl_id = aws_network_acl.public.id
+  rule_number    = 120
+  protocol       = "tcp"
+  rule_action    = "allow"
+  egress         = false
+  cidr_block     = "0.0.0.0/0"
+  from_port      = 1024
+  to_port        = 65535
+}
+
+resource "aws_network_acl_rule" "public_outbound_ephemeral" {
+  network_acl_id = aws_network_acl.public.id
+  rule_number    = 100
+  protocol       = "tcp"
+  rule_action    = "allow"
+  egress         = true
+  cidr_block     = "0.0.0.0/0"
+  from_port      = 1024
+  to_port        = 65535
+}
