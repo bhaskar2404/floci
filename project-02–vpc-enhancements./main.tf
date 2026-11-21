@@ -99,3 +99,35 @@ resource "aws_network_acl_rule" "public_outbound_ephemeral" {
   from_port      = 1024
   to_port        = 65535
 }
+
+resource "aws_network_acl_rule" "public_outbound_http" {
+  network_acl_id = aws_network_acl.public.id
+  rule_number    = 110
+  protocol       = "tcp"
+  rule_action    = "allow"
+  egress         = true
+  cidr_block     = "0.0.0.0/0"
+  from_port      = 80
+  to_port        = 80
+}
+
+resource "aws_network_acl_rule" "public_outbound_https" {
+  network_acl_id = aws_network_acl.public.id
+  rule_number    = 120
+  protocol       = "tcp"
+  rule_action    = "allow"
+  egress         = true
+  cidr_block     = "0.0.0.0/0"
+  from_port      = 443
+  to_port        = 443
+}
+
+resource "aws_network_acl_association" "public_az_a" {
+  network_acl_id = aws_network_acl.public.id
+  subnet_id      = "subnet-6d014f03"
+}
+
+resource "aws_network_acl_association" "public_az_b" {
+  network_acl_id = aws_network_acl.public.id
+  subnet_id      = "subnet-1a442e87"
+}
