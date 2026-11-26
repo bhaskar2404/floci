@@ -23,4 +23,4 @@ flow_log_retention_days = 14
 
 enable_nat_gateway = false # true on real AWS
 enable_irsa        = false # try true on Floci; keep false if it errors
-ecr_repositories   = ["web-app"]
+ecr_repositories   = ["web-app-v2"]
