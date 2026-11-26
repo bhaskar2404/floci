@@ -1,0 +1,118 @@
+pipeline {
+  agent any
+
+  options {
+    disableConcurrentBuilds()
+    timeout(time: 60, unit: 'MINUTES')
+    timestamps()
+  }
+
+  // Uncomment to plan automatically when GitHub changes (polling, no webhook needed)
+  // triggers { pollSCM('H/5 * * * *') }
+
+  parameters {
+    choice(name: 'ENV', choices: ['dev'], description: 'Folder under eks_infra/envs/')
+    choice(name: 'ACTION', choices: ['plan', 'apply', 'destroy'], description: 'What to do')
+    booleanParam(name: 'AUTO_APPROVE', defaultValue: false,
+                 description: 'Skip the approval prompt for apply (destroy always asks)')
+    booleanParam(name: 'RUN_LINT', defaultValue: false,
+                 description: 'Run tflint and checkov (needs: brew install tflint checkov)')
+  }
+
+  environment {
+    TF_IN_AUTOMATION = 'true'
+    TF_INPUT         = '0'
+    PROJECT_DIR      = 'eks_infra'
+    WORKDIR          = "eks_infra/envs/${params.ENV}"
+    STATE_BUCKET     = 'demo-tfstate-000000000000'
+    PATH             = "/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+    // Floci (local). For real AWS: remove these four lines, drop the endpoints
+    // block in providers.tf and the Floci settings in the backend, and use
+    // Jenkins credentials or an assumed IAM role instead.
+    AWS_ACCESS_KEY_ID     = 'test'
+    AWS_SECRET_ACCESS_KEY = 'test'
+    AWS_DEFAULT_REGION    = 'us-east-1'
+    AWS_ENDPOINT_URL      = 'http://localhost:4566'
+  }
+
+  stages {
+    stage('Check tools and Floci') {
+      steps {
+        sh 'terraform version'
+        sh 'aws --version'
+        sh '''
+          aws s3 ls "s3://${STATE_BUCKET}" > /dev/null \
+            || { echo "State bucket ${STATE_BUCKET} not found. Is Floci running? Run terraform apply in ${PROJECT_DIR}/bootstrap first."; exit 1; }
+        '''
+      }
+    }
+
+    stage('Format and validate') {
+      steps {
+        sh "terraform -chdir=${env.PROJECT_DIR} fmt -check -recursive"
+        dir(env.WORKDIR) {
+          sh 'terraform init -input=false'
+          sh 'terraform validate'
+        }
+      }
+    }
+
+    stage('Lint and security') {
+      when { expression { params.RUN_LINT } }
+      steps {
+        dir(env.PROJECT_DIR) {
+          sh 'tflint --recursive || true'
+          sh 'checkov -d . --quiet --compact || true'
+        }
+      }
+    }
+
+    stage('Plan') {
+      steps {
+        dir(env.WORKDIR) {
+          script {
+            def flag = (params.ACTION == 'destroy') ? '-destroy' : ''
+            sh "terraform plan -input=false -lock-timeout=60s ${flag} -out=tfplan"
+            sh 'terraform show -no-color tfplan > plan.txt'
+          }
+        }
+      }
+      post {
+        always {
+          archiveArtifacts artifacts: "${env.WORKDIR}/plan.txt", allowEmptyArchive: true
+        }
+      }
+    }
+
+    stage('Approval') {
+      when { expression { params.ACTION != 'plan' } }
+      steps {
+        script {
+          if (params.ACTION == 'destroy' || !params.AUTO_APPROVE) {
+            timeout(time: 30, unit: 'MINUTES') {
+              input message: "Review plan.txt, then ${params.ACTION} ${params.ENV}?", ok: 'Proceed'
+            }
+          }
+        }
+      }
+    }
+
+    stage('Apply') {
+      when { expression { params.ACTION != 'plan' } }
+      steps {
+        dir(env.WORKDIR) {
+          sh 'terraform apply -input=false -lock-timeout=60s tfplan'
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      dir(env.WORKDIR) { sh 'rm -f tfplan' }
+    }
+    success { echo "Terraform ${params.ACTION} finished for ${params.ENV}" }
+    failure { echo 'Pipeline failed: open the failing stage in Console Output' }
+  }
+}
